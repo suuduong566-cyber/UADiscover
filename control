@@ -1,0 +1,9 @@
+Package: com.local.uadiscover
+Name: UADiscover
+Version: 0.0.1
+Architecture: iphoneos-arm
+Description: Writes a list of UserAgent-related methods found in Safari to a log file (diagnostic only)
+Maintainer: me
+Author: me
+Section: Tweaks
+Depends: mobilesubstrate, firmware (>= 7.0)
