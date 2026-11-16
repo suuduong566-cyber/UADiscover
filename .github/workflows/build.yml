@@ -15,33 +15,18 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            fakeroot \
-            rsync \
-            curl \
-            perl \
-            git \
-            xz-utils \
-            libio-compress-lzma-perl \
-            libtinfo5
+          sudo apt-get install -y build-essential fakeroot rsync curl perl git xz-utils libio-compress-lzma-perl libtinfo5
 
       - name: Install Theos, toolchain and iOS 10.3 SDK
         run: |
           export THEOS="$HOME/theos"
           git clone --recursive https://github.com/theos/theos.git "$THEOS"
-
-          curl -fsSL -o tc.tar.lzma \
-            https://github.com/sbingner/llvm-project/releases/download/v10.0.0-2/linux-ios-arm64e-clang-toolchain.tar.lzma
-
+          curl -fsSL -o tc.tar.lzma https://github.com/sbingner/llvm-project/releases/download/v10.0.0-2/linux-ios-arm64e-clang-toolchain.tar.lzma
           TMP=$(mktemp -d)
           tar --lzma -xf tc.tar.lzma -C "$TMP"
-
           mkdir -p "$THEOS/toolchain/linux/iphone"
           mv "$TMP"/ios-arm64e-clang-toolchain/* "$THEOS/toolchain/linux/iphone/"
-
           rm -rf "$TMP" tc.tar.lzma
-
           "$THEOS/bin/install-sdk" iPhoneOS10.3
           "$THEOS/toolchain/linux/iphone/bin/clang" --version
 
