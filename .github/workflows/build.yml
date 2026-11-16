@@ -1,44 +1,70 @@
-name: Build UADiscover deb
+name: Build GoogleEnhancer
 
 on:
-  workflow_dispatch:
   push:
-    branches: [ main, master ]
+    branches:
+      - main
+  workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-20.04
+    name: Build tweak
+    runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout source
+        uses: actions/checkout@v4
 
       - name: Install dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential fakeroot rsync curl perl git xz-utils libio-compress-lzma-perl libtinfo5
+          sudo apt update
+          sudo apt install -y \
+            make \
+            clang \
+            git \
+            perl \
+            curl \
+            wget \
+            dpkg \
+            fakeroot \
+            build-essential
 
-      - name: Install Theos, toolchain and iOS 10.3 SDK
+      - name: Install ldid
         run: |
-          export THEOS="$HOME/theos"
-          git clone --recursive https://github.com/theos/theos.git "$THEOS"
-          curl -fsSL -o tc.tar.lzma https://github.com/sbingner/llvm-project/releases/download/v10.0.0-2/linux-ios-arm64e-clang-toolchain.tar.lzma
-          TMP=$(mktemp -d)
-          tar --lzma -xf tc.tar.lzma -C "$TMP"
-          mkdir -p "$THEOS/toolchain/linux/iphone"
-          mv "$TMP"/ios-arm64e-clang-toolchain/* "$THEOS/toolchain/linux/iphone/"
-          rm -rf "$TMP" tc.tar.lzma
-          "$THEOS/bin/install-sdk" iPhoneOS10.3
-          "$THEOS/toolchain/linux/iphone/bin/clang" --version
+          git clone https://github.com/ldid-project/ldid.git
+          cd ldid
+          make
+          sudo cp ldid /usr/local/bin/ldid
+          ldid -h
 
-      - name: Build deb
+      - name: Install Theos
         run: |
-          export THEOS="$HOME/theos"
-          cd uad
-          make package FINALPACKAGE=1 THEOS_PLATFORM_DEB_COMPRESSION_TYPE=gzip
+          git clone --recursive https://github.com/theos/theos.git $HOME/theos
+          echo "THEOS=$HOME/theos" >> $GITHUB_ENV
 
-      - name: Upload deb
+      - name: Install iOS SDK
+        run: |
+          git clone https://github.com/theos/sdks.git $HOME/theos/sdks
+
+      - name: Check environment
+        run: |
+          echo "THEOS=$THEOS"
+          ls $THEOS
+          ls $THEOS/sdks
+
+      - name: Build package
+        run: |
+          export THEOS=$HOME/theos
+          make clean
+          make package FINALPACKAGE=1
+
+      - name: Show package
+        run: |
+          ls -la packages/
+
+      - name: Upload Debian package
         uses: actions/upload-artifact@v4
         with:
-          name: UADiscover-deb
-          path: uad/packages/*.deb
+          name: GoogleEnhancer-deb
+          path: packages/*.deb
           if-no-files-found: error
