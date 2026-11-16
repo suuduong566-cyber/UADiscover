@@ -7,242 +7,41 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-20.04
+
     steps:
-      - name: Create project files
-        run: |
-          mkdir -p uad/layout/Library/PreferenceLoader/Preferences && cd uad
-          cat > Makefile <<'UADEOF'
-          export ARCHS = armv7 armv7s
-          export TARGET = iphone:clang:latest:7.0
-
-          include $(THEOS)/makefiles/common.mk
-
-          TWEAK_NAME = UADiscover
-          UADiscover_FILES = Tweak.xm
-          UADiscover_FRAMEWORKS = Foundation
-          UADiscover_CFLAGS = -fobjc-arc
-
-          include $(THEOS_MAKE_PATH)/tweak.mk
-          UADEOF
-          cat > control <<'UADEOF'
-          Package: com.local.uadiscover
-          Name: UADiscover
-          Version: 0.1.0
-          Architecture: iphoneos-arm
-          Description: Change the Safari User-Agent (presets or custom) with an optional discovery log
-          Maintainer: me
-          Author: me
-          Section: Tweaks
-          Depends: mobilesubstrate, preferenceloader, firmware (>= 7.0)
-          UADEOF
-          cat > UADiscover.plist <<'UADEOF'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0"><dict><key>Filter</key><dict><key>Bundles</key><array><string>com.apple.mobilesafari</string></array></dict></dict></plist>
-          UADEOF
-          cat > Tweak.xm <<'UADEOF'
-          // UADiscover 0.1.0 - Safari User-Agent switcher for 32-bit iOS 7-10 (armv7/armv7s)
-          #import <Foundation/Foundation.h>
-          #import <objc/runtime.h>
-          #include <stdarg.h>
-
-          #define PREFS_DOMAIN CFSTR("com.local.uadiscover")
-          #define PREFS_NOTIFY CFSTR("com.local.uadiscover/prefs")
-          #define LOG_PATH     @"/var/mobile/Library/Caches/com.apple.mobilesafari/uad_log.txt"
-
-          static BOOL gEnabled = YES;
-          static BOOL gLogging = NO;
-          static NSString *gUserAgent = nil;
-
-          #pragma mark - Logging
-
-          static void UADLog(NSString *fmt, ...) NS_FORMAT_FUNCTION(1, 2);
-          static void UADLog(NSString *fmt, ...) {
-              if (!gLogging) return;
-              @try {
-                  va_list ap;
-                  va_start(ap, fmt);
-                  NSString *msg = [[NSString alloc] initWithFormat:fmt arguments:ap];
-                  va_end(ap);
-                  NSString *line = [NSString stringWithFormat:@"%@  %@\n", [NSDate date], msg];
-                  NSFileManager *fm = [NSFileManager defaultManager];
-                  if (![fm fileExistsAtPath:LOG_PATH]) {
-                      [fm createFileAtPath:LOG_PATH contents:nil attributes:nil];
-                  }
-                  NSFileHandle *h = [NSFileHandle fileHandleForWritingAtPath:LOG_PATH];
-                  if (!h) return;
-                  [h seekToEndOfFile];
-                  [h writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
-                  [h closeFile];
-              } @catch (NSException *e) {}
-          }
-
-          #pragma mark - Presets & preferences
-
-          static NSDictionary *Presets(void) {
-              static NSDictionary *d;
-              static dispatch_once_t once;
-              dispatch_once(&once, ^{
-                  d = @{
-                    @"mac-safari":  @"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_6) AppleWebKit/603.3.8 (KHTML, like Gecko) Version/10.1.2 Safari/603.3.8",
-                    @"ipad":        @"Mozilla/5.0 (iPad; CPU OS 10_3_3 like Mac OS X) AppleWebKit/603.3.8 (KHTML, like Gecko) Version/10.0 Mobile/14G60 Safari/602.1",
-                    @"win-chrome":  @"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36",
-                    @"win-firefox": @"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:52.0) Gecko/20100101 Firefox/52.0",
-                    @"android":     @"Mozilla/5.0 (Linux; Android 7.0; Pixel) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.83 Mobile Safari/537.36"
-                  };
-              });
-              return d;
-          }
-
-          static id PrefValue(CFStringRef key) {
-              CFPropertyListRef v = CFPreferencesCopyAppValue(key, PREFS_DOMAIN);
-              return v ? CFBridgingRelease(v) : nil;
-          }
-
-          static NSString *UAOverride(void) {
-              return (gEnabled && gUserAgent.length) ? gUserAgent : nil;
-          }
-
-          static void LoadPrefs(void) {
-              CFPreferencesAppSynchronize(PREFS_DOMAIN);
-
-              id en = PrefValue(CFSTR("Enabled"));
-              gEnabled = en ? [en boolValue] : YES;
-
-              id lg = PrefValue(CFSTR("Logging"));
-              gLogging = lg ? [lg boolValue] : NO;
-
-              NSString *custom = PrefValue(CFSTR("CustomUA"));
-              if ([custom isKindOfClass:[NSString class]]) {
-                  custom = [custom stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-              } else {
-                  custom = nil;
-              }
-
-              NSString *preset = PrefValue(CFSTR("Preset"));
-              if (![preset isKindOfClass:[NSString class]]) preset = @"mac-safari";
-
-              gUserAgent = custom.length ? custom : Presets()[preset];
-              UADLog(@"prefs: enabled=%d preset=%@ custom=%d ua=%@", gEnabled, preset, (int)custom.length, gUserAgent);
-          }
-
-          static void PrefsChanged(CFNotificationCenterRef c, void *o, CFStringRef n, const void *obj, CFDictionaryRef u) {
-              LoadPrefs();
-          }
-
-          #pragma mark - Discovery log (the original UADiscover feature)
-
-          static void DiscoverMethods(void) {
-              NSDictionary *ver = [NSDictionary dictionaryWithContentsOfFile:@"/System/Library/CoreServices/SystemVersion.plist"];
-              UADLog(@"=== iOS %@ ===", ver[@"ProductVersion"]);
-              NSArray *names = @[@"WebView", @"WKWebView", @"WebPreferences", @"TabDocument", @"BrowserController"];
-              for (NSString *name in names) {
-                  Class cls = NSClassFromString(name);
-                  if (!cls) { UADLog(@"class %@ : not present", name); continue; }
-                  for (int meta = 0; meta < 2; meta++) {
-                      Class c = meta ? object_getClass(cls) : cls;
-                      unsigned int n = 0;
-                      Method *list = class_copyMethodList(c, &n);
-                      for (unsigned int i = 0; i < n; i++) {
-                          NSString *sel = NSStringFromSelector(method_getName(list[i]));
-                          if ([sel rangeOfString:@"agent" options:NSCaseInsensitiveSearch].location != NSNotFound) {
-                              UADLog(@"%@[%@ %@]", meta ? @"+" : @"-", name, sel);
-                          }
-                      }
-                      free(list);
-                  }
-              }
-          }
-
-          #pragma mark - Hooks
-
-          %group LegacyURL
-          %hook WebView
-          - (NSString *)userAgentForURL:(NSURL *)url {
-              NSString *o = UAOverride();
-              if (o) { UADLog(@"hit WebView userAgentForURL: %@", url); return o; }
-              return %orig;
-          }
-          %end
-          %end
-
-          %group LegacyCustom
-          %hook WebView
-          - (NSString *)customUserAgent {
-              NSString *o = UAOverride();
-              return o ?: %orig;
-          }
-          %end
-          %end
-
-          %group ModernCustom
-          %hook WKWebView
-          - (NSString *)customUserAgent {
-              NSString *o = UAOverride();
-              return o ?: %orig;
-          }
-          %end
-          %end
-
-          static BOOL HasInstanceMethod(const char *cls, SEL sel) {
-              Class c = objc_getClass(cls);
-              return c && class_getInstanceMethod(c, sel) != NULL;
-          }
-
-          %ctor {
-              @autoreleasepool {
-                  LoadPrefs();
-
-                  CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(),
-                      NULL, PrefsChanged, PREFS_NOTIFY, NULL, CFNotificationSuspensionBehaviorCoalesce);
-
-                  // Hook only what exists on this iOS version.
-                  if (HasInstanceMethod("WebView", @selector(userAgentForURL:)))  { %init(LegacyURL);    UADLog(@"hooked WebView userAgentForURL:"); }
-                  if (HasInstanceMethod("WebView", @selector(customUserAgent)))   { %init(LegacyCustom); UADLog(@"hooked WebView customUserAgent"); }
-                  if (HasInstanceMethod("WKWebView", @selector(customUserAgent))) { %init(ModernCustom); UADLog(@"hooked WKWebView customUserAgent"); }
-
-                  // Some WebKit versions read the "UserAgent" default directly.
-                  NSString *o = UAOverride();
-                  if (o) [[NSUserDefaults standardUserDefaults] registerDefaults:@{ @"UserAgent": o }];
-
-                  if (gLogging) DiscoverMethods();
-              }
-          }
-          UADEOF
-          cat > layout/Library/PreferenceLoader/Preferences/UADiscover.plist <<'UADEOF'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0"><dict>
-          <key>entry</key><dict><key>cell</key><string>PSLinkCell</string><key>label</key><string>UADiscover</string></dict>
-          <key>title</key><string>UADiscover</string>
-          <key>items</key><array>
-          <dict><key>cell</key><string>PSGroupCell</string><key>label</key><string>Safari User-Agent</string><key>footerText</key><string>Fully close and reopen Safari after changing settings.</string></dict>
-          <dict><key>cell</key><string>PSSwitchCell</string><key>label</key><string>Enabled</string><key>defaults</key><string>com.local.uadiscover</string><key>key</key><string>Enabled</string><key>default</key><true/><key>PostNotification</key><string>com.local.uadiscover/prefs</string></dict>
-          <dict><key>cell</key><string>PSLinkListCell</string><key>label</key><string>Preset</string><key>detail</key><string>PSListItemsController</string><key>defaults</key><string>com.local.uadiscover</string><key>key</key><string>Preset</string><key>default</key><string>mac-safari</string><key>validValues</key><array><string>mac-safari</string><string>ipad</string><string>win-chrome</string><string>win-firefox</string><string>android</string></array><key>validTitles</key><array><string>Desktop Safari (Mac)</string><string>iPad Safari</string><string>Chrome (Windows)</string><string>Firefox (Windows)</string><string>Chrome (Android)</string></array><key>PostNotification</key><string>com.local.uadiscover/prefs</string></dict>
-          <dict><key>cell</key><string>PSGroupCell</string><key>label</key><string>Custom User-Agent</string><key>footerText</key><string>If filled in, this overrides the preset above. Leave empty to use the preset.</string></dict>
-          <dict><key>cell</key><string>PSEditTextCell</string><key>label</key><string>UA</string><key>defaults</key><string>com.local.uadiscover</string><key>key</key><string>CustomUA</string><key>placeholder</key><string>Mozilla/5.0 ...</string><key>autoCapitalizationType</key><string>None</string><key>autoCorrectionType</key><string>No</string><key>PostNotification</key><string>com.local.uadiscover/prefs</string></dict>
-          <dict><key>cell</key><string>PSGroupCell</string><key>label</key><string>Debug</string><key>footerText</key><string>Writes uad_log.txt to /var/mobile/Library/Caches/com.apple.mobilesafari/</string></dict>
-          <dict><key>cell</key><string>PSSwitchCell</string><key>label</key><string>Discovery log</string><key>defaults</key><string>com.local.uadiscover</string><key>key</key><string>Logging</string><key>default</key><false/><key>PostNotification</key><string>com.local.uadiscover/prefs</string></dict>
-          </array></dict></plist>
-          UADEOF
+      - uses: actions/checkout@v4
 
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential fakeroot rsync curl perl git xz-utils libio-compress-lzma-perl
-          sudo ln -sf /lib/x86_64-linux-gnu/libtinfo.so.6 /lib/x86_64-linux-gnu/libtinfo.so.5
+          sudo apt-get install -y \
+            build-essential \
+            fakeroot \
+            rsync \
+            curl \
+            perl \
+            git \
+            xz-utils \
+            libio-compress-lzma-perl \
+            libtinfo5
 
       - name: Install Theos, toolchain and iOS 10.3 SDK
         run: |
           export THEOS="$HOME/theos"
           git clone --recursive https://github.com/theos/theos.git "$THEOS"
-          curl -fsSL -o tc.tar.lzma https://github.com/sbingner/llvm-project/releases/download/v10.0.0-2/linux-ios-arm64e-clang-toolchain.tar.lzma
+
+          curl -fsSL -o tc.tar.lzma \
+            https://github.com/sbingner/llvm-project/releases/download/v10.0.0-2/linux-ios-arm64e-clang-toolchain.tar.lzma
+
           TMP=$(mktemp -d)
           tar --lzma -xf tc.tar.lzma -C "$TMP"
+
           mkdir -p "$THEOS/toolchain/linux/iphone"
           mv "$TMP"/ios-arm64e-clang-toolchain/* "$THEOS/toolchain/linux/iphone/"
+
           rm -rf "$TMP" tc.tar.lzma
+
           "$THEOS/bin/install-sdk" iPhoneOS10.3
           "$THEOS/toolchain/linux/iphone/bin/clang" --version
 
@@ -251,7 +50,6 @@ jobs:
           export THEOS="$HOME/theos"
           cd uad
           make package FINALPACKAGE=1 THEOS_PLATFORM_DEB_COMPRESSION_TYPE=gzip
-          ls -l packages
 
       - name: Upload deb
         uses: actions/upload-artifact@v4
