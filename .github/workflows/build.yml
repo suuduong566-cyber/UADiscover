@@ -1,0 +1,46 @@
+name: Build UADiscover
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Theos
+        uses: Randomblock1/theos-action@v1
+
+      - name: Build tweak
+        run: |
+          export THEOS="${THEOS:-$GITHUB_WORKSPACE/theos}"
+          echo "THEOS=$THEOS"
+          ls "$THEOS/sdks" || true
+          SDK=$(ls "$THEOS/sdks" 2>/dev/null | grep -E '^iPhoneOS(9|10|11|12)\.' | sed -E 's/^iPhoneOS(.*)\.sdk$/\1/' | sort -V | tail -1)
+          echo "SDK chosen: ${SDK:-none}"
+          if [ -n "$SDK" ]; then
+            make package FINALPACKAGE=1 TARGET="iphone:clang:$SDK:6.0"
+          else
+            make package FINALPACKAGE=1
+          fi
+          ls -la packages
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: UADiscover-deb
+          path: packages/*.deb
+          if-no-files-found: error
+
+      - name: Publish release (tai thang file .deb)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: UADiscover build ${{ github.run_number }}
+          files: packages/*.deb
